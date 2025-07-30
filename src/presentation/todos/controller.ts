@@ -1,31 +1,15 @@
 import { Request, Response } from "express";
-
-const todos = [
-  {
-    id: 1,
-    task: "Learn TypeScript",
-    createdAt: new Date(),
-    completed: false,
-  },
-  {
-    id: 2,
-    task: "Build a REST API",
-    createdAt: new Date(),
-    completed: false,
-  },
-  {
-    id: 3,
-    task: "Deploy to production",
-    createdAt: new Date(),
-    completed: false,
-  },
-];
+import { prisma } from "../../data/postgres";
+import { CreateTodoDto } from "../../domain/dtos/todos/create-todo.dto";
+import { UpdateTodoDto } from "../../domain/dtos/todos/update-todo.dto";
 
 export class TodosController {
   //* DI
   constructor() {}
 
-  public getTodos = (req: Request, res: Response) => {
+  public getTodos = async (req: Request, res: Response) => {
+    const todos = await prisma.todo.findMany();
+
     return res.json({
       message: "Todos fetched successfully",
       status: true,
@@ -33,7 +17,7 @@ export class TodosController {
     });
   };
 
-  public getTodoById = (req: Request, res: Response) => {
+  public getTodoById = async (req: Request, res: Response) => {
     const id = +req.params.id;
     if (isNaN(id)) {
       return res.status(400).json({
@@ -42,7 +26,9 @@ export class TodosController {
         data: null,
       });
     }
-    const todo = todos.find((t) => t.id === id);
+    const todo = await prisma.todo.findUnique({
+      where: { id },
+    });
     todo
       ? res.json({
           message: "Todo found",
@@ -56,45 +42,50 @@ export class TodosController {
         });
   };
 
-  public createTodo = (req: Request, res: Response) => {
-    const { text } = req.body;
+  public createTodo = async (req: Request, res: Response) => {
+    const [error, createTodoDto] = CreateTodoDto.create(req.body);
 
-    if (!text) {
+    if (error) {
       return res.status(400).json({
-        message: "Text is required to create a todo",
+        message: error,
         status: false,
         data: null,
       });
     }
 
-    const newTodo = {
-      id: todos.length + 1,
-      task: text,
-      createdAt: new Date(),
-      completed: false,
-    };
-
-    todos.push(newTodo);
+    const todo = await prisma.todo.create({
+      data: {
+        task: createTodoDto!.text,
+        createdAt: new Date(),
+        completed: false,
+      },
+    });
 
     res.json({
       message: "Todo created successfully",
       status: true,
-      data: todos,
+      data: todo,
     });
   };
 
-  public updateTodo = (req: Request, res: Response) => {
+  public updateTodo = async (req: Request, res: Response) => {
     const id = +req.params.id;
+    const [error, updateTodoDto] = UpdateTodoDto.update({
+      ...req.body,
+      id,
+    });
 
-    if (isNaN(id)) {
+    if (error) {
       return res.status(400).json({
-        message: "Invalid ID format. ID must be a number.",
+        message: error,
         status: false,
         data: null,
       });
     }
 
-    const todo = todos.find((t) => t.id === id);
+    const todo = await prisma.todo.findUnique({
+      where: { id },
+    });
 
     if (!todo) {
       return res.status(404).json({
@@ -104,25 +95,21 @@ export class TodosController {
       });
     }
 
-    const { text, completed } = req.body;
-
-    if (!text || typeof completed !== "boolean") {
-      return res.status(400).json({
-        message: "Text and completed status are required to update a todo",
-        status: false,
-        data: null,
-      });
-    }
-    todo.task = text;
-    todo.completed = completed;
+    const updatedTodo = await prisma.todo.update({
+      where: { id },
+      data: {
+        task: updateTodoDto?.text,
+        completed: updateTodoDto?.completed,
+      },
+    });
     res.json({
       message: "Todo updated successfully",
       status: true,
-      data: todos,
+      data: updatedTodo,
     });
   };
 
-  public deleteTodo = (req: Request, res: Response) => {
+  public deleteTodo = async (req: Request, res: Response) => {
     const id = +req.params.id;
 
     if (isNaN(id)) {
@@ -133,9 +120,13 @@ export class TodosController {
       });
     }
 
-    const todo = todos.find((t) => t.id === id);
+    const existingTodo = await prisma.todo.findUnique({
+      where: { id },
+    });
 
-    if (!todo) {
+    // const existingTodo = todos.find((t) => t.id === id);
+
+    if (!existingTodo) {
       return res.status(404).json({
         message: `Todo with id ${id} not found`,
         status: false,
@@ -144,11 +135,24 @@ export class TodosController {
     }
     // Remove the todo from the array
     //splice index element, count to remove
-    todos.splice(todos.indexOf(todo), 1);
-    res.json({
-      message: "Todo deleted successfully",
-      status: true,
-      data: todo,
+    // todos.splice(todos.indexOf(todo), 1);
+
+    const todoDeleted = await prisma.todo.delete({
+      where: { id },
     });
+
+    if (todoDeleted) {
+      res.json({
+        message: "Todo deleted successfully",
+        status: true,
+        data: todoDeleted,
+      });
+    } else {
+      res.status(500).json({
+        message: "Failed to delete todo",
+        status: false,
+        data: null,
+      });
+    }
   };
 }
